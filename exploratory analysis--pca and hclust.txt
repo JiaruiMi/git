@@ -1,0 +1,75 @@
+# Set working directory
+setwd('F:\\Biomedicine\\Master thesis\\star_align_out')
+getwd()
+dir()
+# Load packages
+library("DESeq2")
+library("RColorBrewer")
+library("gplots")
+library("amap")
+library("ggplot2")
+library("ggcorrplot")
+library("biomaRt")
+library("BiocParallel")
+# Read in data (counts table and sampleGroup)
+data <- read.csv('counts.csv', header = T, row.names = 1)
+head(data)
+dim(data)
+data <- data[rowSums(data)>2,]   # Get rid of lowly expressed gene across all the samples
+dim(data)
+dir()
+sample <- read.csv('SampleGroup.csv', header = T, row.names = 1, colClasses = 'factor')
+head(sample)
+sample_rowname <- rownames(sample)
+# Make DESeq object
+ddsFullCountTable <- DESeqDataSetFromMatrix(countData = data, colData = sample, design  = ~ celltype)
+# Calculation and normalization, ordering according to mad
+dds <- DESeq(ddsFullCountTable)
+normalized_counts <- counts(dds, normalized= T)
+head(normalized_counts)
+normalized_counts_mad <- apply(normalized_counts, 1, mad)
+normalized_counts < normalized_counts[order(normalized_counts_mad, decreasing = T),]
+# Log transformation
+rld <- rlog(dds, blind = F)
+rlogMat <- assay(rld)
+rlogMat <- rlogMat[order(normalized_counts_mad, decreasing = T),]
+# Selecting colors
+hmcol <- colorRampPalette(brewer.pal(9, "GnBu"))(100)
+# Calculating the pearson correlation matrix
+pearson_cor <- as.matrix(cor(rlogMat, method = 'pearson'))
+head(pearson_cor)
+hc <- hcluster(t(rlogMat), method="pearson")
+heatmap.2(pearson_cor, Rowv = as.dendrogram(hc), trace = 'none',symm = T, col = hmcol, main = 'The pearson correlation of each')
+# How to examine the loading scores to determine what variables have the larest effect on the graph
+# Prcomp will give us three things: x, sdev, rotation
+# x contains the prcincipal component for drawing a graph
+# The prcomp() function calls the loading scores rotation, there are loading scores for each PC
+pca <- prcomp(t(rlogMat), scale. = T)   # remember to transpose the matrix
+plot(pca$x[,1],pca$x[,2])
+# loadings for PC1
+loading_score1 <- pca$rotation[,1]
+head(loading_score1)
+gene_score1 <- abs(loading_score1)
+gene_score_ranked1 <- sort(gene_score1, decreasing = T)
+top_25_genes1 <- names(gene_score_ranked1[1:25])
+top_25_genes1
+pca$rotation[top_25_genes1,1]
+# loadings for PC2
+loading_score2 <- pca$rotation[,2]
+head(loading_score2)
+gene_score2 <- abs(loading_score2)
+gene_score_ranked2 <- sort(gene_score2, decreasing = T)
+top_25_genes2 <- names(gene_score_ranked2[1:25])
+top_25_genes2
+pca$rotation[top_25_genes2,1]
+getBM(attributes = c('ensembl_gene_id', 'zfin_id_id', 'zfin_id_symbol', 'entrezgene'), filters ='ensembl_gene_id', values = top_25_genes2, mart = ensembl)
+# Using plotPCA 
+pca_data <- plotPCA(rld, intgroup = c('celltype'), returnData = T, ntop = 5000)    # loading for each principal component (compared with novel analysis with the same important loadings with novel transcripts)
+percentVar <- round(100 * attr(pca_data, "percentVar"))
+p <- ggplot(pca_data, aes(PC1, PC2, color=celltype))
+p + geom_point(size=3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance"))
+plotPCA(rld, intgroup=c("celltype"))
+ggcorrplot(pearson_cor, hc.order = T,lab = T)     
+
